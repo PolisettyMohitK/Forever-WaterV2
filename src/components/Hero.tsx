@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useLayoutEffect, useEffect, useCallback } from "react";
+import { useRef, useLayoutEffect, useEffect } from "react";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
@@ -10,7 +10,7 @@ gsap.registerPlugin(ScrollTrigger);
 const VIDEO_SRC = "/videos/ForeverWaterIntro2.mp4";
 const LOOP_START = 3.04;
 
-/* Split text into word spans */
+/* Split text into word spans for GSAP stagger */
 function WordSpan({ text }: { text: string }) {
   const words = text.split(" ");
   return (
@@ -27,11 +27,13 @@ function WordSpan({ text }: { text: string }) {
 
 export default function Hero() {
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const loopRef = useRef<HTMLVideoElement>(null);
-  const introRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
 
-  /* ── GSAP entrance animation ── */
+  /* ── GSAP entrance animation ──
+     0-1.0s: video only
+     1.0-2.5s: text staggers in
+  */
   useLayoutEffect(() => {
     const container = textLayerRef.current;
     if (!container) return;
@@ -55,15 +57,13 @@ export default function Hero() {
     const targets = [...labels, ...allWords, ...bodies, ...allBtns, ...scrolls];
     if (targets.length === 0) return;
 
-    // Start hidden
     gsap.set(targets, { opacity: 0, y: 28 });
 
     const tl = gsap.timeline({
       defaults: { ease: "power3.out" },
-      delay: 1.0, // 0-1.0s: video only
+      delay: 1.0,
     });
 
-    // 1.0s - 2.5s window for all text
     tl.to(labels,   { opacity: 1, y: 0, duration: 0.6 }, 0)
       .to(allWords, { opacity: 1, y: 0, duration: 0.7, stagger: 0.06 }, 0.15)
       .to(bodies,   { opacity: 1, y: 0, duration: 0.6 }, 0.55)
@@ -106,44 +106,19 @@ export default function Hero() {
   const opacity = useTransform(scrollYProgress, [0, 0.55, 0.85], [1, 1, 0]);
   const scale = useTransform(scrollYProgress, [0, 0.55, 0.85], [1, 1, 0.97]);
 
-  /* ── Video transition: intro 0-3.04s, loop 3.04s-end ── */
-  const setupLoop = useCallback(() => {
-    const loop = loopRef.current;
-    if (!loop) return;
-
-    // Prime decoder at loop start
-    loop.currentTime = LOOP_START;
-
-    // Custom loop: snap back to LOOP_START when near end
-    const onTime = () => {
-      if (loop.duration && loop.currentTime >= loop.duration - 0.08) {
-        loop.currentTime = LOOP_START;
-      }
-    };
-    loop.addEventListener("timeupdate", onTime);
-
-    return () => loop.removeEventListener("timeupdate", onTime);
-  }, []);
-
+  /* ── Single video: play intro 0-3.04s once, then loop 3.04s-end forever ── */
   useEffect(() => {
-    const cleanup = setupLoop();
-    return cleanup;
-  }, [setupLoop]);
+    const vid = videoRef.current;
+    if (!vid) return;
 
-  const handleIntroEnded = () => {
-    const loop = loopRef.current;
-    const intro = introRef.current;
-    if (!loop || !intro) return;
-
-    const onPlaying = () => {
-      loop.removeEventListener("playing", onPlaying);
-      intro.style.opacity = "0";
+    const handleEnded = () => {
+      vid.currentTime = LOOP_START;
+      vid.play();
     };
 
-    loop.addEventListener("playing", onPlaying);
-    loop.currentTime = LOOP_START;
-    loop.play();
-  };
+    vid.addEventListener("ended", handleEnded);
+    return () => vid.removeEventListener("ended", handleEnded);
+  }, []);
 
   return (
     <div ref={wrapperRef} className="relative" style={{ height: "150vh" }}>
@@ -152,26 +127,14 @@ export default function Hero() {
         className="sticky top-0 z-[1] h-svh w-full overflow-hidden"
       >
         <div className="relative h-full w-full">
-          {/* Loop layer — starts at LOOP_START, same source */}
+          {/* Single video element — intro once, then loop segment */}
           <video
-            ref={loopRef}
-            muted
-            playsInline
-            preload="auto"
-            className="absolute inset-0 h-full w-full object-cover"
-          >
-            <source src={VIDEO_SRC} type="video/mp4" />
-          </video>
-
-          {/* Intro layer — plays 0-3.04s then hands off */}
-          <video
-            ref={introRef}
+            ref={videoRef}
             autoPlay
             muted
             playsInline
             preload="auto"
-            onEnded={handleIntroEnded}
-            className="absolute inset-0 z-10 h-full w-full object-cover"
+            className="absolute inset-0 h-full w-full object-cover"
           >
             <source src={VIDEO_SRC} type="video/mp4" />
           </video>
