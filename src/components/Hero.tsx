@@ -8,7 +8,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 gsap.registerPlugin(ScrollTrigger);
 
 const VIDEO_SRC = "/videos/ForeverWaterIntro2.mp4";
-const LOOP_START = 3.04;
+const LOOP_START = 3.06;
 
 /* Split text into word spans for GSAP stagger */
 function WordSpan({ text }: { text: string }) {
