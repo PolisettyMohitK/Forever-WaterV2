@@ -38,8 +38,10 @@ A clean, editorial redesign of the Forever Water brand website. Built from scrat
 - Next.js 16 (App Router, Static Export)
 - Tailwind CSS v4
 - TypeScript
+- GSAP + ScrollTrigger for scroll-driven animations
+- Framer Motion for carousel transitions
+- Three.js (R3F) for generative fluid background
 - Intersection Observer for scroll reveals
-- Zero animation libraries — pure CSS transitions
 
 ## Build
 
