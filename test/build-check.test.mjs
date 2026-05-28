@@ -13,7 +13,7 @@ test("required public images exist", () => {
   ];
 
   const videos = [
-    "Bottle_impacting_reflective_202603220837.mp4",
+    "ForeverWaterIntro2.mp4",
   ];
 
   for (const img of images) {

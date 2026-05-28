@@ -1,32 +1,22 @@
 "use client";
 
-import { useRef, useLayoutEffect, useEffect } from "react";
+import { useRef, useLayoutEffect, useEffect, useCallback } from "react";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 
 gsap.registerPlugin(ScrollTrigger);
 
-/*
-  Both ForeverWaterIntro files are identical content exported from DaVinci Resolve.
-  - .mov = ProRes 422 HQ (178 Mbps) — massive, not web-friendly
-  - .mp4 = H.264 (21 Mbps) — web-optimised, universally supported
-  We use the MP4 for both intro and loop to guarantee a zero-jump cutover
-  because both elements source the exact same pixels.
-*/
 const VIDEO_SRC = "/videos/ForeverWaterIntro2.mp4";
-const LOOP_START = 3.04; // seconds — intro ends here, loop begins here
+const LOOP_START = 3.04;
 
-/* Split text into word spans for GSAP stagger animation */
-function WordSpan({ text, className }: { text: string; className?: string }) {
+/* Split text into word spans */
+function WordSpan({ text }: { text: string }) {
   const words = text.split(" ");
   return (
     <>
       {words.map((word, i) => (
-        <span
-          key={i}
-          className={`word inline-block opacity-0 ${className || ""}`}
-        >
+        <span key={i} className="word inline-block" style={{ opacity: 0 }}>
           {word}
           {i < words.length - 1 ? "\u00A0" : ""}
         </span>
@@ -41,10 +31,7 @@ export default function Hero() {
   const introRef = useRef<HTMLVideoElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
 
-  /* ── Intro load animation ──
-     Timeline starts at 1.0 s so the video plays solo for the first second.
-     All text entrance finishes by 2.5 s (1.5 s window).
-  */
+  /* ── GSAP entrance animation ── */
   useLayoutEffect(() => {
     const container = textLayerRef.current;
     if (!container) return;
@@ -68,24 +55,20 @@ export default function Hero() {
     const targets = [...labels, ...allWords, ...bodies, ...allBtns, ...scrolls];
     if (targets.length === 0) return;
 
+    // Start hidden
+    gsap.set(targets, { opacity: 0, y: 28 });
+
     const tl = gsap.timeline({
       defaults: { ease: "power3.out" },
-      delay: 1.0,
+      delay: 1.0, // 0-1.0s: video only
     });
 
-    // Reset positions before animating
-    gsap.set(targets, { opacity: 0, y: 20 });
-
-    // 1.0s → 1.45s  label
-    // 1.15s → ~1.75s headline words (staggered)
-    // 1.55s → 1.95s  body
-    // 1.85s → ~2.25s buttons
-    // 2.1s  → 2.5s   scroll indicator
-    tl.to(labels,   { opacity: 1, y: 0, duration: 0.45 }, 0)
-      .to(allWords, { opacity: 1, y: 0, duration: 0.5, stagger: 0.04 }, 0.15)
-      .to(bodies,   { opacity: 1, y: 0, duration: 0.4 }, 0.55)
-      .to(allBtns,  { opacity: 1, y: 0, duration: 0.4, stagger: 0.06 }, 0.85)
-      .to(scrolls,  { opacity: 1, y: 0, duration: 0.4 }, 1.1);
+    // 1.0s - 2.5s window for all text
+    tl.to(labels,   { opacity: 1, y: 0, duration: 0.6 }, 0)
+      .to(allWords, { opacity: 1, y: 0, duration: 0.7, stagger: 0.06 }, 0.15)
+      .to(bodies,   { opacity: 1, y: 0, duration: 0.6 }, 0.55)
+      .to(allBtns,  { opacity: 1, y: 0, duration: 0.5, stagger: 0.08 }, 0.8)
+      .to(scrolls,  { opacity: 1, y: 0, duration: 0.5 }, 1.1);
 
     return () => { tl.kill(); };
   }, []);
@@ -123,37 +106,35 @@ export default function Hero() {
   const opacity = useTransform(scrollYProgress, [0, 0.55, 0.85], [1, 1, 0]);
   const scale = useTransform(scrollYProgress, [0, 0.55, 0.85], [1, 1, 0.97]);
 
-  /* ── Loop video: preload and prime decoder at LOOP_START ── */
-  useEffect(() => {
+  /* ── Video transition: intro 0-3.04s, loop 3.04s-end ── */
+  const setupLoop = useCallback(() => {
     const loop = loopRef.current;
     if (!loop) return;
-    loop.load();
+
+    // Prime decoder at loop start
     loop.currentTime = LOOP_START;
-  }, []);
 
-  /* ── Loop video: custom loop segment 3.04 s → end ── */
-  useEffect(() => {
-    const loop = loopRef.current;
-    if (!loop) return;
-
-    const handleTime = () => {
-      // When within 100 ms of the end, snap back to LOOP_START
-      if (loop.duration && loop.currentTime >= loop.duration - 0.1) {
+    // Custom loop: snap back to LOOP_START when near end
+    const onTime = () => {
+      if (loop.duration && loop.currentTime >= loop.duration - 0.08) {
         loop.currentTime = LOOP_START;
       }
     };
+    loop.addEventListener("timeupdate", onTime);
 
-    loop.addEventListener("timeupdate", handleTime);
-    return () => loop.removeEventListener("timeupdate", handleTime);
+    return () => loop.removeEventListener("timeupdate", onTime);
   }, []);
+
+  useEffect(() => {
+    const cleanup = setupLoop();
+    return cleanup;
+  }, [setupLoop]);
 
   const handleIntroEnded = () => {
     const loop = loopRef.current;
     const intro = introRef.current;
     if (!loop || !intro) return;
 
-    // Only hide the intro once the loop has actually started rendering,
-    // preventing a black frame between the two videos.
     const onPlaying = () => {
       loop.removeEventListener("playing", onPlaying);
       intro.style.opacity = "0";
@@ -171,19 +152,18 @@ export default function Hero() {
         className="sticky top-0 z-[1] h-svh w-full overflow-hidden"
       >
         <div className="relative h-full w-full">
-          {/* Loop video — bottom layer, same source, starts at 3.04 s */}
+          {/* Loop layer — starts at LOOP_START, same source */}
           <video
             ref={loopRef}
             muted
             playsInline
             preload="auto"
             className="absolute inset-0 h-full w-full object-cover"
-            style={{ willChange: "opacity" }}
           >
             <source src={VIDEO_SRC} type="video/mp4" />
           </video>
 
-          {/* Intro video — top layer, plays 0 → 3.04 s, instant cut on end */}
+          {/* Intro layer — plays 0-3.04s then hands off */}
           <video
             ref={introRef}
             autoPlay
@@ -192,7 +172,6 @@ export default function Hero() {
             preload="auto"
             onEnded={handleIntroEnded}
             className="absolute inset-0 z-10 h-full w-full object-cover"
-            style={{ willChange: "opacity" }}
           >
             <source src={VIDEO_SRC} type="video/mp4" />
           </video>
@@ -200,17 +179,15 @@ export default function Hero() {
           {/* Bottom gradient */}
           <div className="absolute inset-0 bg-gradient-to-t from-ink via-transparent to-transparent" />
 
-          {/* ── Content ── */}
+          {/* Content */}
           <div ref={textLayerRef} className="absolute inset-0 flex">
             <div className="mx-auto flex h-full w-full max-w-[1400px] flex-col justify-between px-6 py-16 md:px-10 md:py-20">
-              {/*
-                MOBILE (< md): text top-center, buttons bottom-center
-              */}
+              {/* Mobile */}
               <div className="flex flex-col items-center text-center pt-[2vh] md:hidden">
                 <span
                   data-animate="label"
-                  className="label-water mb-3 block opacity-0"
-                  style={{ textShadow: "0 1px 8px rgba(0,0,0,0.5)" }}
+                  className="label-water mb-3 block"
+                  style={{ opacity: 0, textShadow: "0 1px 8px rgba(0,0,0,0.5)" }}
                 >
                   Premium Branded Water
                 </span>
@@ -228,8 +205,8 @@ export default function Hero() {
                 </h1>
                 <p
                   data-animate="body"
-                  className="mt-4 max-w-[42ch] text-base leading-relaxed text-paper/70 opacity-0"
-                  style={{ textShadow: "0 1px 6px rgba(0,0,0,0.45)" }}
+                  className="mt-4 max-w-[42ch] text-base leading-relaxed text-paper/70"
+                  style={{ opacity: 0, textShadow: "0 1px 6px rgba(0,0,0,0.45)" }}
                 >
                   Custom glass bottles for restaurants, hotels, and events.
                   Quietly branded. Calmly placed.
@@ -237,7 +214,8 @@ export default function Hero() {
 
                 <div
                   data-animate="buttons"
-                  className="mt-8 flex w-full flex-col items-center gap-3 opacity-0"
+                  className="mt-8 flex w-full flex-col items-center gap-3"
+                  style={{ opacity: 0 }}
                 >
                   <a href="#collection" className="btn-primary w-full text-center">
                     View Collection
@@ -248,14 +226,12 @@ export default function Hero() {
                 </div>
               </div>
 
-              {/*
-                DESKTOP (md+): diagonal composition
-              */}
+              {/* Desktop */}
               <div className="hidden flex-col items-start text-left md:flex md:pt-[10vh]">
                 <span
                   data-animate="label"
-                  className="label-water mb-5 block opacity-0"
-                  style={{ textShadow: "0 1px 8px rgba(0,0,0,0.5)" }}
+                  className="label-water mb-5 block"
+                  style={{ opacity: 0, textShadow: "0 1px 8px rgba(0,0,0,0.5)" }}
                 >
                   Premium Branded Water
                 </span>
@@ -271,8 +247,8 @@ export default function Hero() {
                 </h1>
                 <p
                   data-animate="body"
-                  className="mt-5 max-w-[42ch] text-base leading-relaxed text-paper/70 md:text-lg opacity-0"
-                  style={{ textShadow: "0 1px 6px rgba(0,0,0,0.45)" }}
+                  className="mt-5 max-w-[42ch] text-base leading-relaxed text-paper/70 md:text-lg"
+                  style={{ opacity: 0, textShadow: "0 1px 6px rgba(0,0,0,0.45)" }}
                 >
                   Custom glass bottles for restaurants, hotels, and events.
                   Quietly branded. Calmly placed.
@@ -284,7 +260,8 @@ export default function Hero() {
                 {/* Scroll indicator */}
                 <div
                   data-animate="scroll"
-                  className="absolute bottom-6 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 opacity-0"
+                  className="absolute bottom-6 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2"
+                  style={{ opacity: 0 }}
                 >
                   <span
                     className="label"
@@ -320,7 +297,8 @@ export default function Hero() {
                 {/* Buttons — bottom-right */}
                 <div
                   data-animate="buttons"
-                  className="ml-auto flex flex-wrap justify-end gap-4 opacity-0"
+                  className="ml-auto flex flex-wrap justify-end gap-4"
+                  style={{ opacity: 0 }}
                 >
                   <a href="#collection" className="btn-primary">
                     View Collection
