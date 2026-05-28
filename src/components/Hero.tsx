@@ -7,8 +7,15 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 
 gsap.registerPlugin(ScrollTrigger);
 
-const INTRO_VIDEO = "/videos/Bottle_impacting_reflective_202603220837.mp4";
-const LOOP_VIDEO = "/videos/Animated_loop_with_202603220818.mp4";
+/*
+  Both ForeverWaterIntro files are identical content exported from DaVinci Resolve.
+  - .mov = ProRes 422 HQ (178 Mbps) — massive, not web-friendly
+  - .mp4 = H.264 (21 Mbps) — web-optimised, universally supported
+  We use the MP4 for both intro and loop to guarantee a zero-jump cutover
+  because both elements source the exact same pixels.
+*/
+const VIDEO_SRC = "/videos/ForeverWaterIntro2.mp4";
+const LOOP_START = 3.04; // seconds — intro ends here, loop begins here
 
 /* Split text into word spans for GSAP stagger animation */
 function WordSpan({ text, className }: { text: string; className?: string }) {
@@ -18,7 +25,7 @@ function WordSpan({ text, className }: { text: string; className?: string }) {
       {words.map((word, i) => (
         <span
           key={i}
-          className={`word inline-block ${className || ""}`}
+          className={`word inline-block opacity-0 ${className || ""}`}
         >
           {word}
           {i < words.length - 1 ? "\u00A0" : ""}
@@ -34,10 +41,9 @@ export default function Hero() {
   const introRef = useRef<HTMLVideoElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
 
-  /* ── Intro load animation: staggered reveal on mount ──
-     Animate both mobile and desktop branches; only the visible one
-     is seen by the user. Query by data-animate attribute so refs
-     don't get overwritten between conditional branches.
+  /* ── Intro load animation ──
+     Timeline starts at 1.0 s so the video plays solo for the first second.
+     All text entrance finishes by 2.5 s (1.5 s window).
   */
   useLayoutEffect(() => {
     const container = textLayerRef.current;
@@ -62,16 +68,24 @@ export default function Hero() {
     const targets = [...labels, ...allWords, ...bodies, ...allBtns, ...scrolls];
     if (targets.length === 0) return;
 
-    const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
+    const tl = gsap.timeline({
+      defaults: { ease: "power3.out" },
+      delay: 1.0,
+    });
 
-    // Hide everything instantly before first paint
+    // Reset positions before animating
     gsap.set(targets, { opacity: 0, y: 20 });
 
-    tl.to(labels, { opacity: 1, y: 0, duration: 0.6 }, 0)
-      .to(allWords, { opacity: 1, y: 0, duration: 0.7, stagger: 0.06 }, 0.15)
-      .to(bodies, { opacity: 1, y: 0, duration: 0.6 }, 0.45)
-      .to(allBtns, { opacity: 1, y: 0, duration: 0.5, stagger: 0.08 }, 0.6)
-      .to(scrolls, { opacity: 1, y: 0, duration: 0.5 }, 0.85);
+    // 1.0s → 1.45s  label
+    // 1.15s → ~1.75s headline words (staggered)
+    // 1.55s → 1.95s  body
+    // 1.85s → ~2.25s buttons
+    // 2.1s  → 2.5s   scroll indicator
+    tl.to(labels,   { opacity: 1, y: 0, duration: 0.45 }, 0)
+      .to(allWords, { opacity: 1, y: 0, duration: 0.5, stagger: 0.04 }, 0.15)
+      .to(bodies,   { opacity: 1, y: 0, duration: 0.4 }, 0.55)
+      .to(allBtns,  { opacity: 1, y: 0, duration: 0.4, stagger: 0.06 }, 0.85)
+      .to(scrolls,  { opacity: 1, y: 0, duration: 0.4 }, 1.1);
 
     return () => { tl.kill(); };
   }, []);
@@ -109,9 +123,28 @@ export default function Hero() {
   const opacity = useTransform(scrollYProgress, [0, 0.55, 0.85], [1, 1, 0]);
   const scale = useTransform(scrollYProgress, [0, 0.55, 0.85], [1, 1, 0.97]);
 
-  // Pre-warm the loop video decoder
+  /* ── Loop video: preload and prime decoder at LOOP_START ── */
   useEffect(() => {
-    loopRef.current?.load();
+    const loop = loopRef.current;
+    if (!loop) return;
+    loop.load();
+    loop.currentTime = LOOP_START;
+  }, []);
+
+  /* ── Loop video: custom loop segment 3.04 s → end ── */
+  useEffect(() => {
+    const loop = loopRef.current;
+    if (!loop) return;
+
+    const handleTime = () => {
+      // When within 100 ms of the end, snap back to LOOP_START
+      if (loop.duration && loop.currentTime >= loop.duration - 0.1) {
+        loop.currentTime = LOOP_START;
+      }
+    };
+
+    loop.addEventListener("timeupdate", handleTime);
+    return () => loop.removeEventListener("timeupdate", handleTime);
   }, []);
 
   const handleIntroEnded = () => {
@@ -119,9 +152,16 @@ export default function Hero() {
     const intro = introRef.current;
     if (!loop || !intro) return;
 
-    loop.currentTime = 0;
+    // Only hide the intro once the loop has actually started rendering,
+    // preventing a black frame between the two videos.
+    const onPlaying = () => {
+      loop.removeEventListener("playing", onPlaying);
+      intro.style.opacity = "0";
+    };
+
+    loop.addEventListener("playing", onPlaying);
+    loop.currentTime = LOOP_START;
     loop.play();
-    intro.style.opacity = "0";
   };
 
   return (
@@ -131,19 +171,19 @@ export default function Hero() {
         className="sticky top-0 z-[1] h-svh w-full overflow-hidden"
       >
         <div className="relative h-full w-full">
-          {/* Loop video — bottom layer */}
+          {/* Loop video — bottom layer, same source, starts at 3.04 s */}
           <video
             ref={loopRef}
             muted
-            loop
             playsInline
             preload="auto"
             className="absolute inset-0 h-full w-full object-cover"
+            style={{ willChange: "opacity" }}
           >
-            <source src={LOOP_VIDEO} type="video/mp4" />
+            <source src={VIDEO_SRC} type="video/mp4" />
           </video>
 
-          {/* Intro video — top layer, instant cut on end */}
+          {/* Intro video — top layer, plays 0 → 3.04 s, instant cut on end */}
           <video
             ref={introRef}
             autoPlay
@@ -152,8 +192,9 @@ export default function Hero() {
             preload="auto"
             onEnded={handleIntroEnded}
             className="absolute inset-0 z-10 h-full w-full object-cover"
+            style={{ willChange: "opacity" }}
           >
-            <source src={INTRO_VIDEO} type="video/mp4" />
+            <source src={VIDEO_SRC} type="video/mp4" />
           </video>
 
           {/* Bottom gradient */}
@@ -168,7 +209,7 @@ export default function Hero() {
               <div className="flex flex-col items-center text-center pt-[2vh] md:hidden">
                 <span
                   data-animate="label"
-                  className="label-water mb-3 block"
+                  className="label-water mb-3 block opacity-0"
                   style={{ textShadow: "0 1px 8px rgba(0,0,0,0.5)" }}
                 >
                   Premium Branded Water
@@ -187,7 +228,7 @@ export default function Hero() {
                 </h1>
                 <p
                   data-animate="body"
-                  className="mt-4 max-w-[42ch] text-base leading-relaxed text-paper/70"
+                  className="mt-4 max-w-[42ch] text-base leading-relaxed text-paper/70 opacity-0"
                   style={{ textShadow: "0 1px 6px rgba(0,0,0,0.45)" }}
                 >
                   Custom glass bottles for restaurants, hotels, and events.
@@ -196,7 +237,7 @@ export default function Hero() {
 
                 <div
                   data-animate="buttons"
-                  className="mt-8 flex w-full flex-col items-center gap-3"
+                  className="mt-8 flex w-full flex-col items-center gap-3 opacity-0"
                 >
                   <a href="#collection" className="btn-primary w-full text-center">
                     View Collection
@@ -213,7 +254,7 @@ export default function Hero() {
               <div className="hidden flex-col items-start text-left md:flex md:pt-[10vh]">
                 <span
                   data-animate="label"
-                  className="label-water mb-5 block"
+                  className="label-water mb-5 block opacity-0"
                   style={{ textShadow: "0 1px 8px rgba(0,0,0,0.5)" }}
                 >
                   Premium Branded Water
@@ -230,7 +271,7 @@ export default function Hero() {
                 </h1>
                 <p
                   data-animate="body"
-                  className="mt-5 max-w-[42ch] text-base leading-relaxed text-paper/70 md:text-lg"
+                  className="mt-5 max-w-[42ch] text-base leading-relaxed text-paper/70 md:text-lg opacity-0"
                   style={{ textShadow: "0 1px 6px rgba(0,0,0,0.45)" }}
                 >
                   Custom glass bottles for restaurants, hotels, and events.
@@ -243,7 +284,7 @@ export default function Hero() {
                 {/* Scroll indicator */}
                 <div
                   data-animate="scroll"
-                  className="absolute bottom-6 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2"
+                  className="absolute bottom-6 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 opacity-0"
                 >
                   <span
                     className="label"
@@ -279,7 +320,7 @@ export default function Hero() {
                 {/* Buttons — bottom-right */}
                 <div
                   data-animate="buttons"
-                  className="ml-auto flex flex-wrap justify-end gap-4"
+                  className="ml-auto flex flex-wrap justify-end gap-4 opacity-0"
                 >
                   <a href="#collection" className="btn-primary">
                     View Collection
